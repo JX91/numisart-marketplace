@@ -219,7 +219,6 @@ contract PMGContract {
         bid auction item,unfreeze previous highest bidder fund and lock current bidder fund,update auction detail
      */
     function bidNFT(uint256 _auctionItemId,uint256 _price) public payable {
-        // require(IERC721(nftContract).ownerOf(_tokenId) == msg.sender,"not nft owner");
         auctionDetail memory auctionitem = auctionItem[_auctionItemId];
         require (auctionitem.endTime>block.timestamp,"auction end");
         require (auctionitem.seller != msg.sender && auctionitem.highestBidder != msg.sender,"cannot bid on own auction | already highest bidder");
