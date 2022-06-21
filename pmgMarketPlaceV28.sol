@@ -47,6 +47,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
         uint256 price;
         uint256 tokenId;
         bool isActive;
+        bool nftOfferStatus; //NFT status when offered
     }
 
 
@@ -59,6 +60,8 @@ contract PMGContract is ReentrancyGuard,Ownable{
     mapping (address=>bool) public isTokenSupport;
     mapping (address=>address) public strategy;
     mapping (address=>bool) public isNFTSupport;
+    mapping (address=>bool) public isAdmin;
+    mapping (address=>mapping(uint256=>bool)) public isWithPMG;
     mapping (address=>mapping(address=>mapping(uint256=>bool))) public userOfferId;
     mapping (uint256=>listDetail) public listItem;
     mapping (uint256=>mapping(address=>nftProfitSharing)) private nftProfit;
@@ -71,7 +74,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
     event Listing(address indexed seller, uint256 itemId, address currencyAddress, address nftAddress, uint256 tokenId, uint256 amount);
     event Delist(uint indexed itemId);
     event BuyNFT(address indexed seller,address indexed buyer, uint256 itemId, address currencyAddress, address nftAddress, uint256 tokenId, uint256 amount);
-    event NewOffer(address indexed buyer, address currencyAddress, address nftAddress, uint256 tokenId, uint256 offerId, uint256 amount);
+    event NewOffer(address indexed buyer, address currencyAddress, address nftAddress, uint256 tokenId, uint256 offerId, uint256 amount,bool nftOfferStatus);
     event CancelOffer(address indexed buyer, uint256 offerId);
     event AcceptOffer(address indexed seller, address indexed buyer, uint256 offerId);
     event Auction(address indexed seller, address currencyAddress, address nftAddress, uint256 minimumAmount,uint256 startingPrice, uint256 auctionId, uint256 tokenId, uint256 expiryTime);
@@ -79,6 +82,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
     event AuctionEnd(address indexed buyer, uint256 auctionId);
     event AuctionRestart(uint256 auctionId,address currencyAddress, uint256 minimumAmount,uint256 startingPrice, uint256 expiryTime);
     event AuctionCancel(uint256 auctionId);
+    event NftStatus(address nftContract, uint256 tokenId, bool nftStatus);
 
     /* add new support token */
     function addCoin(address _token) external onlyOwner {
@@ -96,6 +100,12 @@ contract PMGContract is ReentrancyGuard,Ownable{
     function editStrategy(address _tokenContract,address _strategy) external onlyOwner  {
         require(isTokenSupport[_tokenContract]&& strategy[_tokenContract] != _strategy,"token not supported | same strategy");
         strategy[_tokenContract] = _strategy;
+    }
+
+    /*add admin address*/
+    function addAdmin(address _admin) external onlyOwner  {
+        require(!isAdmin[_admin],"admin already existed");
+        isAdmin[_admin] = true;
     }
 
     /* list NFT
@@ -180,6 +190,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
             * require item owner is auction address
             * require payment token is supported
             * require nft contract is supported
+            * require physical banknote is on NumisArt
             * auction period 0 < days < 7
         1)increment auction list length
         2)create auction detail
@@ -190,6 +201,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
         require(isTokenSupport[_tokenContract],"payment token not support");
         require(isNFTSupport[_nftContract],"nft contract not support");
         require(0 < _day && _day <= 7,"not support");
+        require(isWithPMG[_nftContract][_tokenId],"Physical Banknotes is not with NumisArt");
         auctionItemLength+=1;
         auctionItem[auctionItemLength] =  auctionDetail(msg.sender,_tokenContract,_nftContract,_price,_tokenId,block.timestamp+ (_day *  1 days) ,_min_bid,_price,address(0),Status.AUCTION);
         IERC721(_nftContract).transferFrom(msg.sender,address(this),_tokenId);
@@ -315,7 +327,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
         4)create offer item
         5)update user offer nft status
      */
-    function offerNFT(address _tokenContract,address _nftContract,uint256 _tokenId,uint256 _price) external payable  nonReentrant{
+    function offerNFT(address _tokenContract,address _nftContract,uint256 _tokenId,uint256 _price, bool _nftOfferStatus) external payable  nonReentrant{
         /*  need to offer the NFT */
         require(isTokenSupport[_tokenContract],"payment token not support");
         require(isNFTSupport[_nftContract],"nft contract not support");
@@ -342,20 +354,22 @@ contract PMGContract is ReentrancyGuard,Ownable{
             }
         }
         
-        offerList[offerItemLength]= offerDetail(msg.sender,_tokenContract,_nftContract,_price,_tokenId,true);
+        offerList[offerItemLength]= offerDetail(msg.sender,_tokenContract,_nftContract,_price,_tokenId,true,_nftOfferStatus);
         userOfferId[msg.sender][_nftContract][_tokenId] = true;
-        emit NewOffer(  msg.sender ,  _tokenContract,  _nftContract,  _tokenId,  offerItemLength,  _price);
+        emit NewOffer(  msg.sender ,  _tokenContract,  _nftContract,  _tokenId,  offerItemLength,  _price,_nftOfferStatus);
     }
 
     /* cancel offer NFT and claim
         condition
             * require user offer this nft before
+            * require offer status is not active
         1)update offer item status
         2)unlock user pool balance
         3)update user offer nft status
      */
     function cancelOfferAndClaim(uint256 _offerId) external {
         require(userOfferId[msg.sender][offerList[_offerId].nftContract][offerList[_offerId].tokenId],"Invalid offer");
+        require(offerList[_offerId].isActive,"Offer is not active");
         offerList[_offerId].isActive = false;
         IStrategy(strategy[offerList[_offerId].cryptoToken]).unlockFund(offerList[_offerId].price ,msg.sender);
         userOfferId[msg.sender][offerList[_offerId].nftContract][offerList[_offerId].tokenId] = false;
@@ -367,6 +381,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
             * require user is current owner(nft cant be auction and list)
             * require offer not end
             * require offer status is valid
+            * cannot accept offer when the nftOfferStatus is true but isWithPMG is false
         1)get offer item detail
         2)get exOwner detail
         3)update exOwner
@@ -379,6 +394,9 @@ contract PMGContract is ReentrancyGuard,Ownable{
         address  own = IERC721(offerdetail.nftContract).ownerOf(offerdetail.tokenId);
         require(offerdetail.isActive,"offer invalid");
         require(own == msg.sender ,"not owner now");
+        if (offerdetail.nftOfferStatus && !isWithPMG[offerdetail.nftContract][offerdetail.tokenId]){
+            revert("Physical Banknotes is not with NumisArt");
+        }
         if(profit.pioneer == address(0)){
             nftProfit[offerdetail.tokenId][offerdetail.nftContract].pioneer = msg.sender;
         }else if(profit.ownerCount<10){
@@ -386,7 +404,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
             nftProfit[offerdetail.tokenId][offerdetail.nftContract].ownerCount+=1;
         }
         IERC721(offerdetail.nftContract).transferFrom(msg.sender,offerdetail.offerAddress,offerdetail.tokenId);
-        IStrategy(strategy[offerdetail.cryptoToken]).deposit(offerdetail.price  ,msg.sender,offerdetail.tokenId,offerdetail.offerAddress,1,1,offerdetail.nftContract);
+        IStrategy(strategy[offerdetail.cryptoToken]).deposit(offerdetail.price,msg.sender,offerdetail.tokenId,offerdetail.offerAddress,1,1,offerdetail.nftContract);
         offerList[_offerId].isActive = false;
         emit AcceptOffer(msg.sender, offerdetail.offerAddress, _offerId);
     }
@@ -409,6 +427,38 @@ contract PMGContract is ReentrancyGuard,Ownable{
             IERC20(_tokenContract).approve(strategy[_tokenContract],_amount);
             IERC20(_tokenContract).safeTransferFrom(msg.sender,address(this),_amount);
             IStrategy(strategy[_tokenContract]).directDeposit(_amount ,msg.sender,0);
+        }
+    }
+
+    /*  user update physical banknote status
+        condition
+            * require NFT contract is supported
+            * require the NFT is belongs to the user
+            * require the NFT status is true
+        1)update NFT status is with the NumisArt or without
+    */
+    function userUpdatePMG(address _nftContract, uint256 _tokenId) external{
+        require(isNFTSupport[_nftContract],"NFT not supported");
+        require(IERC721(_nftContract).ownerOf(_tokenId) == msg.sender && isWithPMG[_nftContract][_tokenId],"not nft owner");
+        isWithPMG[_nftContract][_tokenId] = !isWithPMG[_nftContract][_tokenId];
+        emit NftStatus(_nftContract,_tokenId,isWithPMG[_nftContract][_tokenId]);
+    }
+
+    /*  admin update physical banknote status
+        condition
+            * require NFT contract is supported
+            * require NFT contract length and tokenId length is same
+            * require NFT contract length and tokenId length cannot exceeded 50
+        1)update batch NFT status is with the NumisArt or without
+    */
+    function adminUpdatePMG(address[] memory _nftContract, uint256[] memory _tokenId, bool _status) external{
+        require(isAdmin[msg.sender],"not admin");
+        require(_nftContract.length == _tokenId.length,"NFT contract size and tokenId length must be same");
+        require(_nftContract.length <= 50 && _tokenId.length <= 50,"cannot update over 50 NFTs");
+        for( uint256 i; i<_tokenId.length; i++){
+            require(isNFTSupport[_nftContract[i]],"NFT not supported");
+            isWithPMG[_nftContract[i]][_tokenId[i]] =  _status;
+            emit NftStatus(_nftContract[i],_tokenId[i],_status);
         }
     }
 
