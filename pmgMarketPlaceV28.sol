@@ -362,7 +362,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
     /* cancel offer NFT and claim
         condition
             * require user offer this nft before
-            * require offer status is not active
+            * require offer status is active
         1)update offer item status
         2)unlock user pool balance
         3)update user offer nft status
