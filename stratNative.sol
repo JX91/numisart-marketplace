@@ -55,13 +55,7 @@ interface IAlpacaLending {
 
 //market place interface
 interface IMarketPlace{
-    struct nftProfitSharing{
-        address pioneer;
-        address[10] exOwner;
-        uint256 ownerCount;
-    }
-    function nftProfitDetail(uint256 _tokenId,address _nftContract ) external view returns (nftProfitSharing memory);
-
+    function pioneerDetail(uint256 _tokenId,address _nftContract ) external view returns (address);
 }
 
 contract BNBStrategy is ReentrancyGuard{
@@ -72,18 +66,14 @@ contract BNBStrategy is ReentrancyGuard{
         uint256 wantFreeze;
         uint256 share;
     }
-    address immutable pmgAddress;
-    address immutable devAddress;
-    address immutable nftContractOwner;
+    address public devAddress;
     address public govAddress; 
     uint256 public shareLockedTotal ;
     address immutable public farmContractAddress;
     address public marketContractAddress;
     mapping(address=>userInfo) public userInfos;
-    constructor(address _pmgAddress, address _devAddress,address _nftContractOwner,address _farmContract, address _marketContract){
-        pmgAddress = _pmgAddress;
+    constructor(address _devAddress,address _farmContract, address _marketContract){
         devAddress = _devAddress;
-        nftContractOwner = _nftContractOwner;
         govAddress = msg.sender;
         farmContractAddress = _farmContract;
         marketContractAddress = _marketContract;
@@ -121,25 +111,9 @@ contract BNBStrategy is ReentrancyGuard{
             userInfos[buyer].share -= sharesTotal;
         }
         /* get exOwner detail and update distribute amount to pool */
-        IMarketPlace.nftProfitSharing memory nftDetail = IMarketPlace(marketContractAddress).nftProfitDetail(_tokenId,_nftContract);
-        uint256 exOwnerProfitWant;
-        uint256 exOwnerProfitShares;
-        _addBalance(seller,_wantAmt * 840 / 1000,sharesTotal * 840 / 1000);
-        _addBalance(devAddress,_wantAmt * 50 / 1000,sharesTotal * 50 / 1000);
-        _addBalance(pmgAddress,_wantAmt * 25 / 1000,sharesTotal * 25 / 1000);
-        _addBalance(nftContractOwner,_wantAmt * 10 / 1000,sharesTotal * 10 / 1000);
-        _addBalance(nftDetail.pioneer,_wantAmt * 50 / 1000,sharesTotal * 50 / 1000);
-        if(nftDetail.ownerCount > 0){
-            exOwnerProfitWant = _wantAmt * 25 / 1000 / nftDetail.ownerCount;
-            exOwnerProfitShares = sharesTotal * 25 / 1000 / nftDetail.ownerCount;
-            for(uint256 i ; i<nftDetail.ownerCount; i++){
-                _addBalance(nftDetail.exOwner[i],exOwnerProfitWant,exOwnerProfitShares);
-            }
-        }else{
-            _addBalance(devAddress,_wantAmt * 25 / 1000,sharesTotal * 25 / 1000);
-        }
-        
-        
+        _addBalance(seller,_wantAmt * 865 / 1000,sharesTotal * 865 / 1000);
+        _addBalance(devAddress,_wantAmt * 85 / 1000,sharesTotal * 85 / 1000);
+        _addBalance(IMarketPlace(marketContractAddress).pioneerDetail(_tokenId,_nftContract),_wantAmt * 50 / 1000,sharesTotal * 50 / 1000);
     } 
 
     /* direct deposit to strategy
@@ -232,6 +206,12 @@ contract BNBStrategy is ReentrancyGuard{
     function reassignGov(address _govAddress) external{
         require(msg.sender == govAddress,"not allow");
         govAddress = _govAddress;
+    }
+
+    
+    function reassignPmg(address _devAddress) external{
+        require(msg.sender == govAddress,"not allow");
+        devAddress = _devAddress;
     }
     fallback() external payable{}
 }
