@@ -50,13 +50,6 @@ contract PMGContract is ReentrancyGuard,Ownable{
         bool nftOfferStatus; //NFT status when offered
     }
 
-
-    struct nftProfitSharing{
-        address pioneer;
-        address[10] exOwner;
-        uint256 ownerCount;
-    }
-
     mapping (address=>bool) public isTokenSupport;
     mapping (address=>address) public strategy;
     mapping (address=>bool) public isNFTSupport;
@@ -64,7 +57,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
     mapping (address=>mapping(uint256=>bool)) public isWithPMG;
     mapping (address=>mapping(address=>mapping(uint256=>bool))) public userOfferId;
     mapping (uint256=>listDetail) public listItem;
-    mapping (uint256=>mapping(address=>nftProfitSharing)) private nftProfit;
+    mapping (uint256=>mapping(address=>address)) private pioneer;
     mapping (uint256=>auctionDetail) public auctionItem;
     mapping (uint256=>offerDetail) public offerList;
     uint256 public listItemLength;
@@ -143,7 +136,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
         condition 
             * require item status to be listing
             * buyer balance must be sufficient for pay
-        1)get list item detail,update exOwner/pioneer info
+        1)get list item detail,update pioneer info
         2)check avaible balance and freeze balance from strategy
         2a)transfer coin/token to pool if insufficient balance
         3)update related address pool balance and distribute the payment
@@ -152,14 +145,11 @@ contract PMGContract is ReentrancyGuard,Ownable{
     function buyNFT(uint256 _index ) external payable nonReentrant{
         listDetail memory item = listItem[_index] ;
         require(item.status == Status.LISTING,"invalid status");
-        nftProfitSharing  memory profit = nftProfit[item.tokenId][item.nftContract];
         listItem[_index].status = Status.SOLD;
-        if(profit.pioneer == address(0)){
-            nftProfit[item.tokenId][item.nftContract].pioneer = item.seller;
-        }else if(profit.ownerCount<10){
-            nftProfit[item.tokenId][item.nftContract].exOwner[profit.ownerCount] = (item.seller);
-            nftProfit[item.tokenId][item.nftContract].ownerCount+=1;
+        if(pioneer[item.tokenId][item.nftContract] == address(0)){
+            pioneer[item.tokenId][item.nftContract] = item.seller;
         }
+
         (uint256 balance,uint256 freezeBalance,) = IStrategy(strategy[item.cryptoToken]).userInfos(msg.sender);
         if(item.cryptoToken == 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c){
             if(balance - freezeBalance< item.price){
@@ -257,24 +247,20 @@ contract PMGContract is ReentrancyGuard,Ownable{
             * only seller or highest bidder can trigger
             * require auction end and status Auction
         1)get auction item detail
-        2)get nft exOwner detail
+        2)get nft pioneer detail
         3)update auction status
-        4)update exOwner
+        4)update pioneer
         5)distribute and update related address pool balance
         6)transfer nft to highest bidder
      */
     function claimAuctionNFT(uint256 _auctionItemId) external  {
         auctionDetail memory auctionitem = auctionItem[_auctionItemId];
-        nftProfitSharing  memory profit = nftProfit[auctionitem.tokenId][auctionitem.nftContract];
         require(msg.sender == auctionitem.seller || msg.sender == auctionitem.highestBidder ,"unauthorized" );
         require (auctionitem.endTime<block.timestamp,"auction end");
         require( auctionitem.status == Status.AUCTION ,"invalid status" );
         auctionItem[_auctionItemId].status = Status.SOLD;
-        if(profit.pioneer == address(0)){
-            nftProfit[auctionitem.tokenId][auctionitem.nftContract].pioneer = auctionitem.seller;
-        }else if(profit.ownerCount<10){
-            nftProfit[auctionitem.tokenId][auctionitem.nftContract].exOwner[profit.ownerCount] = (auctionitem.seller);
-            nftProfit[auctionitem.tokenId][auctionitem.nftContract].ownerCount+=1;
+        if(pioneer[auctionitem.tokenId][auctionitem.nftContract]== address(0)){
+            pioneer[auctionitem.tokenId][auctionitem.nftContract] = auctionitem.seller;
         }
         IStrategy(strategy[auctionitem.cryptoToken]).deposit(auctionitem.highestBid  ,auctionitem.seller,auctionitem.tokenId,auctionitem.highestBidder,1,1,auctionitem.nftContract);
         IERC721(auctionitem.nftContract).transferFrom(address(this),auctionitem.highestBidder,auctionitem.tokenId);
@@ -383,25 +369,21 @@ contract PMGContract is ReentrancyGuard,Ownable{
             * require offer status is valid
             * cannot accept offer when the nftOfferStatus is true but isWithPMG is false
         1)get offer item detail
-        2)get exOwner detail
-        3)update exOwner
+        2)get pioneer detail
+        3)update pioneer
         4)distribute and update related address pool balance 
         5)update offer status
     */
     function acceptOffer(uint256 _offerId) external  {
         offerDetail memory offerdetail = offerList[_offerId];
-        nftProfitSharing  memory profit = nftProfit[offerdetail.tokenId][offerdetail.nftContract];
         address  own = IERC721(offerdetail.nftContract).ownerOf(offerdetail.tokenId);
         require(offerdetail.isActive,"offer invalid");
         require(own == msg.sender ,"not owner now");
         if (offerdetail.nftOfferStatus && !isWithPMG[offerdetail.nftContract][offerdetail.tokenId]){
             revert("Physical Banknotes is not with NumisArt");
         }
-        if(profit.pioneer == address(0)){
-            nftProfit[offerdetail.tokenId][offerdetail.nftContract].pioneer = msg.sender;
-        }else if(profit.ownerCount<10){
-            nftProfit[offerdetail.tokenId][offerdetail.nftContract].exOwner[profit.ownerCount] = (msg.sender);
-            nftProfit[offerdetail.tokenId][offerdetail.nftContract].ownerCount+=1;
+        if(pioneer[offerdetail.tokenId][offerdetail.nftContract] == address(0)){
+            pioneer[offerdetail.tokenId][offerdetail.nftContract] = msg.sender;
         }
         IERC721(offerdetail.nftContract).transferFrom(msg.sender,offerdetail.offerAddress,offerdetail.tokenId);
         IStrategy(strategy[offerdetail.cryptoToken]).deposit(offerdetail.price,msg.sender,offerdetail.tokenId,offerdetail.offerAddress,1,1,offerdetail.nftContract);
@@ -462,8 +444,8 @@ contract PMGContract is ReentrancyGuard,Ownable{
         }
     }
 
-    /* nftExOwnerDetail */
-    function nftProfitDetail(uint256 _tokenId,address _nftContract) public view returns (nftProfitSharing memory)  {
-        return nftProfit[_tokenId][_nftContract];
+    /* pioneer */
+    function pioneerDetail(uint256 _tokenId,address _nftContract) public view returns (address)  {
+        return pioneer[_tokenId][_nftContract];
     }
 } 
