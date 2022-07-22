@@ -136,7 +136,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
         condition 
             * require item status to be listing
             * buyer balance must be sufficient for pay
-        1)get list item detail,update pioneer info
+        1)get list item detail,update exOwner/pioneer info
         2)check avaible balance and freeze balance from strategy
         2a)transfer coin/token to pool if insufficient balance
         3)update related address pool balance and distribute the payment
@@ -247,9 +247,9 @@ contract PMGContract is ReentrancyGuard,Ownable{
             * only seller or highest bidder can trigger
             * require auction end and status Auction
         1)get auction item detail
-        2)get nft pioneer detail
+        2)get nft exOwner detail
         3)update auction status
-        4)update pioneer
+        4)update exOwner
         5)distribute and update related address pool balance
         6)transfer nft to highest bidder
      */
@@ -369,8 +369,8 @@ contract PMGContract is ReentrancyGuard,Ownable{
             * require offer status is valid
             * cannot accept offer when the nftOfferStatus is true but isWithPMG is false
         1)get offer item detail
-        2)get pioneer detail
-        3)update pioneer
+        2)get exOwner detail
+        3)update exOwner
         4)distribute and update related address pool balance 
         5)update offer status
     */
@@ -388,6 +388,7 @@ contract PMGContract is ReentrancyGuard,Ownable{
         IERC721(offerdetail.nftContract).transferFrom(msg.sender,offerdetail.offerAddress,offerdetail.tokenId);
         IStrategy(strategy[offerdetail.cryptoToken]).deposit(offerdetail.price,msg.sender,offerdetail.tokenId,offerdetail.offerAddress,1,1,offerdetail.nftContract);
         offerList[_offerId].isActive = false;
+        userOfferId[msg.sender][offerdetail.nftContract][offerdetail.tokenId] = false;
         emit AcceptOffer(msg.sender, offerdetail.offerAddress, _offerId);
     }
 
